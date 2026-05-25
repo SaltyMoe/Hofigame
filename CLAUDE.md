@@ -9,91 +9,95 @@ Built as a **single `index.html`** file — pure JS + Canvas, no frameworks, no 
 
 ---
 
-## Full Game Spec
+## Full Game Spec (as implemented)
 
 ### Main Character: Hofi
 - Bald head, glasses, sporty MTB rider
-- Controls: Arrow keys = drive, Space = jump
+- Controls: Arrow keys = drive, Space/↑ = jump
 - Special: K (in air) = kickflip (Level 2+), P = protector (Level 4 boss)
 
 ### Level 1 – "Aschaffenburg" (Easy)
-- Stones + bushes as obstacles, small gaps
+- Platforms with gaps, stones + bushes as decos
+- **Helena + Clara** (children on bikes) at start — first collision shows Stephie warning
+- **Mona** (apron, rolling pin) on later platform: "MTB is gruselig, ich backe lieber" — obstacle
+- **Katy** on racing bike (Rennrad, aero tuck): "Rennrad > MTB" — obstacle (different platform from Mona)
 - Green/pastoral atmosphere
-- No enemies, no special mechanics
 
 ### Level 2 – "München" (Medium)
-- "Niko" pokes head from left edge of screen with speech bubble: **"Mach einen Kickflip!"**
-- K key while airborne = kickflip animation (360° spin) + doubles jump distance
-- One large gap that requires kickflip to clear
-- Teaches the kickflip mechanic
+- **Niko** stands physically before the kickflip gap (cx:465) with bubble: "Mach einen Kickflip! (drücke K in der Luft)"
+- K key while airborne = kickflip (360° wheel spin, body rises separately, slight height+forward boost)
+- 370px gap between platform 2 and 3 — requires kickflip to cross
+- **Johanna** lying crashed on platform 3 (cx:980): "Ich bin gestürzt, aber kein Problem, morgen 150km Radtour" — obstacle
+- **Velomobil person** in yellow aerodynamic capsule (cx:1280): thought bubble "Bald KPMG Gehalt hehehe, da kann man sich schon Mal was gönnen" — obstacle
+- Background: Frauenkirche + Olympiaturm silhouettes, Richtung-Samerberg signs
+- City/grey palette
 
-### Level 3 – "Arzler Alm" (Hard)
-- Enemies: FPÖ voters who want to ban MTB — patrol platforms, must be avoided
-- Signs everywhere labeled **"Arzler Alm Trail"**
-- Touch enemy = restart level
+### Level 3 – "Innsbruck" (Hard)
+- Enemies: FPÖ voters patrol platforms ("MTB verbieten!", "Wege nur zum Wandern!") — touch = restart
+- Signs: "Innsbruck", "Höttinger Alm", "Umbrüggler Alm"
+- Background: Schloss Ambras silhouette, mountain shapes
 - Alpine palette
 
 ### Level 4 – "Ligurien" (Hardest — Boss Level)
-- Boss: **GYMMOE** — very wide torso, many curls, blocks the path
-- GYMMOE speech bubble cycles through:
-  1. "Ahhh, heute bin ich zu faul mich hier zu bewegen."
-  2. "Keine Lust"
-  3. "Rülps mich nicht von der Seite an"
-- Walking into GYMMOE = defeat → show hint screen
+- Hofi spawns at startY:240, falls from shuttle bus at start
+- **4 platforms** with 80px gaps (must jump 3 gaps before boss)
+- **Simon** on bar stool (cx:710): "Mein Bike ist schon wieder kaputt, Tre Campari Spritz, per favore." — obstacle
+- **Campari Spritz glass** (cx:745) — separate obstacle after Simon
+- Background: **Johannes** flies past periodically: "Ich will mehr Pizza"
+- **GYMMOE** boss at x:1100 — very wide torso, curly hair, lazy speech bubbles
+- Walking into GYMMOE = defeat → hint screen
+- Secret: **P** = Protektor → GYMMOE launches UPWARD off screen
+- After boss gone: goal flag at x:1400, walk to it → Win
 
 ### Defeat Hint Screen (vs GYMMOE)
 > "Wenn du gewinnen willst, musst du den Anfangsbuchstaben deines Geschenks drücken.
 > Kannst du es erraten? Es gibt dir eine breitere Brust um den Gymmoe abzudrängen."
 
-Secret: **P** = Protektor (chest protector for MTB)
-
-### When P is Pressed (vs GYMMOE)
-- Hofi sprite gets a visible chest protector (wider torso, dark plate)
-- GYMMOE slides off screen to the right
-- Level won → Win screen
-
 ### Win Screen
-Big banner: **"Glückwunsch! Du hast gewonnen. Erhalte jetzt dein Geschenk."**
-
-Then scrolling list (top to bottom) with confetti:
-> Alles Gute zum Geburtstag wünschen: Corinna, Jakob, Johanna, Johannes, Katha, Katy, Felix, Simon, Simon, Simi, Moe, Mona, Niko, Stephanie
+Big banner + confetti. Names list:
+> Corinna, Jakob, Johanna, Johannes, Katha, Katy, Felix, Simon, Simon, Simi, Moe, Mona, Niko, Stephanie
 
 ---
 
-## Architecture (planned)
+## Architecture
 
-Single `<script>` block with section comments:
-
+Single `<script>` block:
 ```
-CONFIG      – canvas size, physics constants
-LEVELS      – data arrays (platforms, decorations, enemies, events, goalX)
+CONFIG      – W=800, H=450, GRAVITY=0.5, JUMP_FORCE=-12, PLAYER_SPEED=4, PW=28, PH=42
+LEVELS      – array: platforms, decos, enemies, events, children, npcs, goalX, worldW, hasBoss
 INPUT       – keydown/keyup → keys map + justPressed set
-CAMERA      – camX follows player, world→screen translation
-SPRITES     – all draw*() functions (no external images)
-PHYSICS     – gravity, AABB collision helpers
-ENTITIES    – Player class, Enemy class, Boss (GYMMOE) class
-EVENTS      – zone-triggered dialog system
-PARTICLES   – confetti for win screen
-SCREENS     – title, levelComplete, defeatHint, win renderers
-GAME        – state machine, level loader
+SPRITES     – all draw*() functions (no images)
+PHYSICS     – overlap(a,b) AABB
+ENTITIES    – Player, EnemyNPC, Boss classes
+CAMERA      – camX = clamp(player.x - W/3, 0, worldW-W)
+PARTICLES   – Confetti class, 150 instances
+SCREENS     – drawTitle, drawLevelDone, drawDefeatHint, drawWin
+GAME        – loadLevel, update, restart, handleInput
 LOOP        – requestAnimationFrame
 ```
 
 ### Key technical notes
-- Canvas: 800 × 450 px
-- GRAVITY = 0.5 px/frame²,  JUMP_FORCE = -12,  PLAYER_SPEED = 4
-- Kickflip: activatable once per airborne phase (K key), multiplies vx × 2 for duration of jump
-- GYMMOE boss: phase = 'blocking' → 'pushed' after protector; slides right at +3px/frame until off-screen
-- All sprites drawn with canvas 2D primitives (arcs, rects, lines) — no images
-- Confetti: ~150 particles, spinning colored rectangles, respawn from top when off-bottom
+- **Kickflip**: K in air → `flipAngle += 0.18` per frame, full 2π = one flip; body rises (`bodyLift = -sin(flipT*π)*16`), wheel coin-flips (`scale(1, cos(kAngle))`); slight vy boost + 2× vx forward (needed to clear 370px gap)
+- **GYMMOE bounds**: `{x:this.x, y:0, w:this.w, h:H}` — full canvas height, can't jump over
+- **GYMMOE pushed**: `launchVy -= 0.4` per frame → accelerates upward; offScreen when y < -300
+- **NPC system**: `npcs` array in level data `{cx, type, obstacle, gy}`; hitboxes computed per type in update(); drawn in drawPlaying() with type-specific draw fn + bubble
+- **Thought bubble**: `drawThoughtBubble(bx,by,text)` — cloud shape (bumpy top via arcs) + 3 dot chain below
+- **Children (Level 1)**: drawn via `children` array, separate from npcs; Stephie warning on first Helena/Clara hit
+- **Dialog system**: events[] triggers dialog at trigX; auto-dismisses after 220 frames (only used in Level 1 now)
+- **Win condition (Level 4)**: `bossDefeated && player.x >= 1400`
+
+### Sprite functions
+`drawHofi`, `drawEnemy`, `drawGymmoe`, `drawNikoPeek`, `drawStephiePeek`, `drawChild`, `drawMona`, `drawKaty`, `drawJohannes`, `drawNikoStanding`, `drawJohanna`, `drawVelomobil`, `drawSimon`, `drawCampariGlass`, `drawBubble`, `drawThoughtBubble`, `drawDeco`, `drawFlag`, `roundRect`
 
 ---
 
 ## Status
 - [x] Repo initialized, pushed to GitHub
-- [x] Game spec finalized
-- [x] Architecture plan written
-- [ ] `index.html` implementation — **TODO (next session)**
+- [x] Level 1 – Aschaffenburg: Helena, Clara, Mona, Katy
+- [x] Level 2 – München: Niko standing NPC, kickflip gap, Johanna crashed, Velomobil, city background
+- [x] Level 3 – Innsbruck: FPÖ patrol enemies, Schloss Ambras, signs
+- [x] Level 4 – Ligurien: shuttle start, 4 platforms, Simon+Campari, Johannes flyby, GYMMOE boss, P=Protektor, win screen
+- [ ] Playtesting / polish (next session)
 
-## Plan File
-Full detailed plan: `.claude/plans/weiter-machen-tingly-rabbit.md` (local only, not committed)
+## GitHub
+Repo: `https://github.com/SaltyMoe/Hofigame` — branch `main`
