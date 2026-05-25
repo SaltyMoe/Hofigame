@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Hofigame – Alles Gute zum Geburtstag!</title>
+<style>
+  body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const W = 800, H = 450;
+const GRAVITY = 0.5;
+const JUMP_FORCE = -12;
+const PLAYER_SPEED = 4;
+const PW = 28, PH = 42;
+
+const canvas = document.getElementById('c');
+canvas.width = W; canvas.height = H;
+const ctx = canvas.getContext('2d');
+
+// ─── INPUT ────────────────────────────────────────────────────────────────────
+const keys = {};
+const justPressed = new Set();
+document.addEventListener('keydown', e => {
+  if (!keys[e.code]) justPressed.add(e.code);
+  keys[e.code] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ─── LEVELS ───────────────────────────────────────────────────────────────────
+const LEVELS = [
+  {
+    name: 'Aschaffenburg',
+    bg: '#87ceeb', ground: '#5d8a3c',
+    platforms: [
+      {x:0,   y:380, w:320, h:20},
+      {x:350, y:380, w:220, h:20},
+      {x:600, y:380, w:250, h:20},
+      {x:880, y:380, w:300, h:20},
+      {x:1210,y:380, w:350, h:20},
+      {x:1590,y:380, w:400, h:20},
+    ],
+    decos: [
+      {t:'bush',  x:80,  y:360}, {t:'stone', x:190, y:372},
+      {t:'bush',  x:430, y:360}, {t:'tree',  x:640, y:320},
+      {t:'stone', x:930, y:372}, {t:'bush',  x:1250,y:360},
+      {t:'tree',  x:1420,y:320}, {t:'bush',  x:1650,y:360},
+    ],
+    enemies: [],
+    events: [],
+    goalX: 1850, worldW: 2000, hasBoss: false,
+  },
+  {
+    name: 'München',
+    bg: '#b8c8dc', ground: '#777',
+    platforms: [
+      {x:0,   y:380, w:310, h:20},
+      {x:340, y:380, w:160, h:20},
+      // gap ~130px wide, needs kickflip
+      {x:870, y:370, w:220, h:20},
+      {x:1130,y:380, w:300, h:20},
+      {x:1470,y:380, w:450, h:20},
+    ],
+    decos: [
+      {t:'bldg', x:80,  y:320, bh:72}, {t:'bldg', x:380, y:300, bh:88},
+      {t:'bldg', x:920, y:290, bh:82}, {t:'bldg', x:1200,y:310, bh:68},
+    ],
+    enemies: [],
+    events: [{trigX:260, speaker:'Niko', msg:'Mach einen Kickflip!', done:false}],
+    goalX: 1780, worldW: 1950, hasBoss: false,
+  },
+  {
+    name: 'Arzler Alm',
+    bg: '#c8dfc0', ground: '#6d4c2a',
+    platforms: [
+      {x:0,   y:380, w:210, h:20},
+      {x:240, y:350, w:160, h:20},
+      {x:440, y:380, w:210, h:20},
+      {x:690, y:348, w:190, h:20},
+      {x:920, y:380, w:210, h:20},
+      {x:1170,y:358, w:160, h:20},
+      {x:1370,y:380, w:450, h:20},
+    ],
+    decos: [
+      {t:'mountain', x:0,   y:240}, {t:'mountain', x:380, y:220},
+      {t:'mountain', x:750, y:230}, {t:'sign', x:100, y:358},
+      {t:'sign', x:470, y:358},     {t:'sign', x:950, y:358},
+      {t:'sign', x:1200,y:336},
+    ],
+    enemies: [
+      {x:340, y:314, w:26, h:36, vx:1.2, minX:250, maxX:390},
+      {x:710, y:312, w:26, h:36, vx:1.0, minX:695, maxX:870},
+      {x:960, y:344, w:26, h:36, vx:1.1, minX:930, maxX:1120},
+    ],
+    events: [],
+    goalX: 1680, worldW: 1870, hasBoss: false,
+  },
+  {
+    name: 'Ligurien',
+    bg: '#70bfff', ground: '#c2a07a',
+    platforms: [{x:0, y:380, w:3000, h:20}],
+    decos: [
+      {t:'palm', x:120, y:340}, {t:'palm', x:480, y:340},
+      {t:'ocean', x:0,  y:398},
+    ],
+    enemies: [],
+    events: [],
+    goalX: 99999, worldW: 1300, hasBoss: true,
+  },
+];
+
+// ─── SPRITES ──────────────────────────────────────────────────────────────────
+
+function drawHofi(x, y, dir, kAngle, prot) {
+  ctx.save();
+  ctx.translate(x + PW/2, y + PH/2);
+  if (dir < 0) ctx.scale(-1, 1);
+
+  const flipping = kAngle > 0;
+  // bike floats up during flip (sin arc: 0 at start/end, max at middle)
+  const bikeFloat = flipping ? -Math.sin(kAngle * 0.5) * 18 : 0;
+  // coin-flip around long axis: cos goes 1 → 0 → -1 → 0 → 1
+  const coinScale = flipping ? Math.cos(kAngle) : 1;
+
+  // === BIKE ===
+  ctx.save();
+  ctx.translate(2, 20 + bikeFloat);
+  ctx.scale(1, coinScale);
+  ctx.strokeStyle = '#444'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(-10, 8, 8, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(10, 8, 8, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-10,8); ctx.lineTo(0,-4); ctx.lineTo(10,8);
+  ctx.moveTo(0,-4); ctx.lineTo(-4,2);
+  ctx.moveTo(0,-4); ctx.lineTo(6,-10);
+  ctx.stroke();
+  ctx.restore();
+
+  // === BODY ===
+  ctx.fillStyle = prot ? '#2a2a2a' : '#e8621a';
+  ctx.fillRect(-10, -8, 20, 19);
+  if (prot) {
+    ctx.fillStyle = '#444'; ctx.fillRect(-13, -10, 26, 22);
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(-11, -8, 22, 18);
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
+    for (let i=0; i<3; i++) {
+      ctx.beginPath(); ctx.moveTo(-11,-4+i*5); ctx.lineTo(11,-4+i*5); ctx.stroke();
+    }
+  }
+
+  // === LEGS ===
+  ctx.fillStyle = '#1a3a99';
+  if (flipping) {
+    ctx.fillRect(-9, 11, 7, 13); // back leg stays
+    ctx.save();
+    ctx.translate(5, 13);
+    // front leg kicks down/forward during flip then retracts
+    ctx.rotate(Math.sin(kAngle * 0.5) * 0.8);
+    ctx.fillRect(0, 0, 7, 14);
+    ctx.restore();
+  } else {
+    ctx.fillRect(-9, 11, 7, 13);
+    ctx.fillRect(2, 11, 7, 13);
+  }
+
+  // === HEAD (bald + glasses) ===
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(1, -18, 11, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.beginPath(); ctx.ellipse(-3, -22, 4, 2.5, -0.5, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+  ctx.fillStyle = 'rgba(120,190,255,0.35)';
+  ctx.beginPath(); ctx.arc(-4.5, -18, 4, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(5.5, -18, 4, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-0.5,-18); ctx.lineTo(1.5,-18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-14,-18); ctx.lineTo(-8.5,-18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(9.5,-18); ctx.lineTo(14,-18); ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawEnemy(x, y, w, h) {
+  ctx.save();
+  ctx.translate(x + w/2, y);
+  // body
+  ctx.fillStyle = '#c62828';
+  ctx.fillRect(-w/2, 0, w, h-8);
+  // head
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(0, -9, 10, 0, Math.PI*2); ctx.fill();
+  // angry hair
+  ctx.fillStyle = '#4a2e1a';
+  ctx.fillRect(-10, -19, 20, 8);
+  // angry brows
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-7,-12); ctx.lineTo(-2,-9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(7,-12); ctx.lineTo(2,-9); ctx.stroke();
+  // sign
+  ctx.fillStyle = 'white';
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+  ctx.fillRect(-14, h-24, 28, 15); ctx.strokeRect(-14, h-24, 28, 15);
+  ctx.fillStyle = '#c62828';
+  ctx.font = 'bold 7px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('FPÖ', 0, h-13);
+  ctx.restore();
+}
+
+function drawGymmoe(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  // very wide torso
+  ctx.fillStyle = '#7b3f00';
+  ctx.fillRect(-55, 0, 110, 85);
+  // shirt stripes
+  ctx.strokeStyle = '#5a2d00'; ctx.lineWidth = 3;
+  for (let i=1; i<4; i++) { ctx.beginPath(); ctx.moveTo(-55, i*20); ctx.lineTo(55, i*20); ctx.stroke(); }
+  // massive bicep left
+  ctx.fillStyle = '#a0522d';
+  ctx.beginPath(); ctx.ellipse(-70, 28, 22, 16, 0.3, 0, Math.PI*2); ctx.fill();
+  ctx.fillRect(-88, 32, 36, 16); // forearm
+  // massive bicep right
+  ctx.beginPath(); ctx.ellipse(70, 28, 22, 16, -0.3, 0, Math.PI*2); ctx.fill();
+  ctx.fillRect(52, 32, 36, 16);
+  // neck
+  ctx.fillStyle = '#f4c08a';
+  ctx.fillRect(-12, -16, 24, 18);
+  // head
+  ctx.beginPath(); ctx.arc(0, -32, 26, 0, Math.PI*2); ctx.fill();
+  // hair dark
+  ctx.fillStyle = '#1a1a1a';
+  ctx.fillRect(-26, -58, 52, 24);
+  ctx.beginPath(); ctx.arc(0, -46, 26, Math.PI, 0); ctx.fill();
+  // eyes (half-lidded, lazy)
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-12, -36, 8, 3);
+  ctx.fillRect(4, -36, 8, 3);
+  // half-closed lids
+  ctx.fillStyle = '#f4c08a';
+  ctx.fillRect(-12, -38, 8, 3);
+  ctx.fillRect(4, -38, 8, 3);
+  // frown
+  ctx.strokeStyle = '#a0522d'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, -18, 9, 0.25, Math.PI-0.25); ctx.stroke();
+  // legs
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-48, 85, 40, 40);
+  ctx.fillRect(8, 85, 40, 40);
+  ctx.restore();
+}
+
+function drawNikoPeek(x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(0, 0, 22, 0, Math.PI*2); ctx.fill();
+  // short hair
+  ctx.fillStyle = '#3d2b1a';
+  ctx.fillRect(-22, -22, 44, 14);
+  ctx.beginPath(); ctx.arc(0, -10, 22, Math.PI, 0); ctx.fill();
+  // eyes
+  ctx.fillStyle = '#333';
+  ctx.beginPath(); ctx.arc(-8, -4, 3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(8, -4, 3, 0, Math.PI*2); ctx.fill();
+  // smile
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, 2, 8, 0.2, Math.PI-0.2); ctx.stroke();
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+function drawBubble(bx, by, text, speaker) {
+  const lines = text.split('\n');
+  ctx.font = '13px sans-serif';
+  const tw = Math.max(...lines.map(l => ctx.measureText(l).width),
+    speaker ? ctx.measureText(speaker+':').width + 4 : 0);
+  const bw = tw + 20, bh = lines.length*18 + (speaker?20:0) + 16;
+  ctx.fillStyle = 'white'; ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
+  roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
+  // tail
+  ctx.beginPath(); ctx.moveTo(bx+20, by+bh); ctx.lineTo(bx+8, by+bh+12); ctx.lineTo(bx+38, by+bh); ctx.closePath();
+  ctx.fillStyle = 'white'; ctx.fill(); ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1; ctx.stroke();
+  let ty = by+14;
+  if (speaker) {
+    ctx.fillStyle = '#0055cc'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(speaker+':', bx+10, ty); ty += 20;
+  }
+  ctx.fillStyle = '#111'; ctx.font = '13px sans-serif'; ctx.textAlign = 'left';
+  for (const l of lines) { ctx.fillText(l, bx+10, ty); ty += 18; }
+}
+
+function drawDeco(d) {
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  switch(d.t) {
+    case 'bush':
+      ctx.fillStyle = '#2e7d32';
+      ctx.beginPath(); ctx.arc(0,0,16,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(14,4,13,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(-14,4,13,0,Math.PI*2); ctx.fill();
+      break;
+    case 'stone':
+      ctx.fillStyle = '#777';
+      ctx.beginPath(); ctx.ellipse(0,0,18,11,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#aaa';
+      ctx.beginPath(); ctx.ellipse(-4,-3,9,5,-0.3,0,Math.PI*2); ctx.fill();
+      break;
+    case 'tree':
+      ctx.fillStyle = '#5d4037'; ctx.fillRect(-5,0,10,45);
+      ctx.fillStyle = '#1b5e20';
+      ctx.beginPath(); ctx.arc(0,0,27,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0,-18,22,0,Math.PI*2); ctx.fill();
+      break;
+    case 'bldg': {
+      const bh = d.bh || 70;
+      ctx.fillStyle = '#9e9e9e'; ctx.fillRect(-28,-bh,56,bh);
+      ctx.fillStyle = '#757575'; ctx.fillRect(-28,-bh,56,6);
+      for (let row=0; row<3; row++) for (let col=0; col<3; col++) {
+        ctx.fillStyle = (row*3+col)%3===0 ? '#ffe082' : '#555';
+        ctx.fillRect(-20+col*16, -bh+14+row*18, 10,12);
+      }
+      break;
+    }
+    case 'sign':
+      ctx.fillStyle = '#8b6914'; ctx.fillRect(-3,-30,6,30);
+      ctx.fillStyle = '#fff8dc'; ctx.strokeStyle='#8b6914'; ctx.lineWidth=2;
+      ctx.fillRect(-40,-52,80,24); ctx.strokeRect(-40,-52,80,24);
+      ctx.fillStyle = '#c0392b'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign='center';
+      ctx.fillText('Arzler Alm Trail', 0, -35);
+      break;
+    case 'mountain':
+      ctx.fillStyle = '#546e7a';
+      ctx.beginPath(); ctx.moveTo(-130,150); ctx.lineTo(0,0); ctx.lineTo(130,150); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'white';
+      ctx.beginPath(); ctx.moveTo(-35,35); ctx.lineTo(0,0); ctx.lineTo(35,35); ctx.closePath(); ctx.fill();
+      break;
+    case 'palm':
+      ctx.fillStyle = '#8d6e63'; ctx.fillRect(-5,-85,10,85);
+      ctx.fillStyle = '#33691e';
+      for (let a=0; a<5; a++) {
+        ctx.save(); ctx.rotate(a*Math.PI*2/5);
+        ctx.beginPath(); ctx.moveTo(0,-85);
+        ctx.bezierCurveTo(15,-95,50,-82,55,-70);
+        ctx.bezierCurveTo(45,-78,22,-90,0,-85);
+        ctx.fill(); ctx.restore();
+      }
+      break;
+    case 'ocean':
+      ctx.fillStyle = '#1565c0'; ctx.fillRect(0,0,3000,50);
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      for (let wx=0; wx<3000; wx+=60) {
+        ctx.beginPath(); ctx.arc(wx, 8, 20, 0, Math.PI); ctx.fill();
+      }
+      break;
+  }
+  ctx.restore();
+}
+
+function drawFlag(x, y) {
+  ctx.fillStyle = '#ffd700'; ctx.fillRect(x,y,4,55);
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath(); ctx.moveTo(x+4,y); ctx.lineTo(x+34,y+13); ctx.lineTo(x+4,y+26); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#333'; ctx.font='10px sans-serif'; ctx.textAlign='left';
+  ctx.fillText('ZIEL', x+6, y+42);
+}
+
+// ─── PARTICLES ────────────────────────────────────────────────────────────────
+const CC = ['#e74c3c','#3498db','#2ecc71','#f1c40f','#9b59b6','#e67e22','#1abc9c','#ff69b4'];
+class Confetti {
+  constructor(init=false) { this.reset(init); }
+  reset(init=false) {
+    this.x = Math.random()*W; this.y = init ? Math.random()*H : -10;
+    this.vx = (Math.random()-0.5)*2.5; this.vy = 1.2+Math.random()*2.5;
+    this.rot = Math.random()*Math.PI*2; this.rv = (Math.random()-0.5)*0.14;
+    this.c = CC[Math.random()*CC.length|0];
+    this.w = 5+Math.random()*7; this.h = 3+Math.random()*4;
+  }
+  tick() {
+    this.x+=this.vx; this.y+=this.vy; this.rot+=this.rv;
+    if (this.y>H+10) this.reset();
+  }
+  draw() {
+    ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rot);
+    ctx.fillStyle=this.c; ctx.fillRect(-this.w/2,-this.h/2,this.w,this.h);
+    ctx.restore();
+  }
+}
+const confetti = Array.from({length:150}, (_,i) => new Confetti(true));
+
+// ─── PHYSICS ──────────────────────────────────────────────────────────────────
+function overlap(a, b) {
+  return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+// ─── ENTITIES ─────────────────────────────────────────────────────────────────
+class Player {
+  constructor() {
+    this.x=50; this.y=300; this.vx=0; this.vy=0;
+    this.onGround=false; this.dir=1;
+    this.canFlip=false; this.flipAngle=0; this.flipping=false;
+    this.prot=false; this.w=PW; this.h=PH;
+  }
+  update(platforms) {
+    if (!this.flipping) {
+      if (keys['ArrowRight']) { this.vx=PLAYER_SPEED; this.dir=1; }
+      else if (keys['ArrowLeft']) { this.vx=-PLAYER_SPEED; this.dir=-1; }
+      else this.vx=0;
+    }
+
+    if ((justPressed.has('ArrowUp')||justPressed.has('Space')) && this.onGround) {
+      this.vy=JUMP_FORCE; this.onGround=false; this.canFlip=true;
+    }
+    if (justPressed.has('KeyK') && !this.onGround && this.canFlip) {
+      this.flipping=true; this.flipAngle=0; this.canFlip=false;
+      this.vx = this.dir * PLAYER_SPEED * 2.5; // 2.5× boost, locked in for flip duration
+    }
+    if (this.flipping) {
+      this.flipAngle += 0.18;
+      if (this.flipAngle >= Math.PI*2) { this.flipAngle=0; this.flipping=false; }
+    }
+    // land mid-flip → abort flip cleanly
+    this.vy += GRAVITY;
+    this.x += this.vx; this.y += this.vy;
+    this.onGround = false;
+    for (const p of platforms) {
+      const prev = this.y + PH - this.vy;
+      if (prev <= p.y && this.y+PH >= p.y &&
+          this.x+PW > p.x && this.x < p.x+p.w) {
+        this.y = p.y - PH; this.vy = 0; this.onGround = true;
+      }
+    }
+    if (this.flipping && this.onGround) { this.flipping=false; this.flipAngle=0; }
+    if (this.x < 0) this.x = 0;
+    if (this.y + PH > H + 80) return 'fell';
+  }
+  draw(cx) { drawHofi(this.x-cx, this.y, this.dir, this.flipping?this.flipAngle:0, this.prot); }
+  get bounds() { return {x:this.x, y:this.y, w:PW, h:PH}; }
+}
+
+class EnemyNPC {
+  constructor(d) { Object.assign(this,d); this.w=d.w; this.h=d.h; }
+  update() {
+    this.x+=this.vx;
+    if (this.x>this.maxX||this.x<this.minX) this.vx*=-1;
+  }
+  draw(cx) { drawEnemy(this.x-cx, this.y, this.w, this.h); }
+  get bounds() { return {x:this.x, y:this.y, w:this.w, h:this.h}; }
+}
+
+class Boss {
+  constructor() {
+    this.x=740; this.y=255; this.w=110; this.h=125;
+    this.phase='blocking'; this.mIdx=0; this.mTimer=0;
+    this.msgs=[
+      'Ahhh, heute bin ich zu faul\nmich hier zu bewegen.',
+      'Keine Lust',
+      'Rülps mich nicht\nvon der Seite an',
+    ];
+  }
+  update() {
+    this.mTimer++;
+    if (this.mTimer>200) { this.mTimer=0; this.mIdx=(this.mIdx+1)%this.msgs.length; }
+    if (this.phase==='pushed') this.x+=3;
+  }
+  draw(cx) {
+    const sx=this.x-cx;
+    drawGymmoe(sx+this.w/2, this.y);
+    if (this.phase==='blocking') drawBubble(sx-30, this.y-100, this.msgs[this.mIdx], 'GYMMOE');
+  }
+  get bounds() { return {x:this.x, y:this.y, w:this.w, h:this.h}; }
+  get offScreen() { return this.x > 2000; }
+}
+
+// ─── CAMERA ───────────────────────────────────────────────────────────────────
+let camX = 0;
+
+// ─── GAME STATE ───────────────────────────────────────────────────────────────
+// states: title | playing | levelDone | defeatHint | win
+let gstate = 'title';
+let lvlIdx = 0;
+let player, enemies, boss, events;
+let dialog = null, dialogTimer = 0;
+
+function loadLevel(i) {
+  const L = LEVELS[i];
+  player = new Player();
+  enemies = L.enemies.map(e => new EnemyNPC({...e}));
+  boss = L.hasBoss ? new Boss() : null;
+  events = L.events.map(e => ({...e}));
+  dialog = null; dialogTimer = 0; camX = 0;
+}
+
+// ─── SCREENS ──────────────────────────────────────────────────────────────────
+function drawTitle() {
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#1a237e'); g.addColorStop(1,'#283593');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // mountains silhouette
+  ctx.fillStyle='#0d47a1';
+  ctx.beginPath();
+  ctx.moveTo(0,H); ctx.lineTo(100,230); ctx.lineTo(200,H);
+  ctx.moveTo(180,H); ctx.lineTo(340,190); ctx.lineTo(500,H);
+  ctx.moveTo(460,H); ctx.lineTo(620,210); ctx.lineTo(780,H);
+  ctx.lineTo(W,H); ctx.fill();
+
+  ctx.textAlign='center';
+  ctx.fillStyle='#fff'; ctx.font='bold 54px sans-serif';
+  ctx.fillText('HOFIGAME', W/2, 98);
+  ctx.fillStyle='#ffe082'; ctx.font='20px sans-serif';
+  ctx.fillText('Alles Gute zum Geburtstag, Hofi!', W/2, 136);
+
+  // mini Hofi
+  drawHofi(364, 190, 1, 0, false);
+
+  ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(180,270,440,110);
+  ctx.fillStyle='#e0e0e0'; ctx.font='16px sans-serif';
+  ctx.fillText('Pfeiltasten = fahren   Leertaste/↑ = springen', W/2, 298);
+  ctx.fillText('K (in der Luft) = Kickflip  (Level 2+)', W/2, 322);
+  ctx.fillText('4 Level, 1 Boss-Kampf – viel Erfolg!', W/2, 346);
+  ctx.fillStyle='#ffe082'; ctx.font='bold 22px sans-serif';
+  ctx.fillText('[ LEERTASTE zum Starten ]', W/2, 402);
+}
+
+function drawLevelDone() {
+  ctx.fillStyle='rgba(0,0,0,0.62)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.fillStyle='#ffe082'; ctx.font='bold 44px sans-serif';
+  ctx.fillText('Level geschafft!', W/2, 175);
+  ctx.fillStyle='#fff'; ctx.font='24px sans-serif';
+  ctx.fillText(LEVELS[lvlIdx].name+' ✓', W/2, 225);
+  if (lvlIdx < LEVELS.length-1) {
+    ctx.fillStyle='#ccc'; ctx.font='18px sans-serif';
+    ctx.fillText('[ LEERTASTE für nächstes Level ]', W/2, 315);
+  }
+}
+
+function drawDefeatHint() {
+  ctx.fillStyle='rgba(0,0,40,0.9)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.fillStyle='#e74c3c'; ctx.font='bold 32px sans-serif';
+  ctx.fillText('Hoppla! GYMMOE lässt sich nicht verdrängen...', W/2, 90);
+  ctx.fillStyle='#ffe082'; ctx.font='18px sans-serif';
+  const lines = [
+    'Wenn du gewinnen willst, musst du den',
+    'Anfangsbuchstaben deines Geschenks drücken.',
+    '',
+    'Kannst du es erraten?',
+    'Es gibt dir eine breitere Brust,',
+    'um den Gymmoe abzudrängen.',
+  ];
+  lines.forEach((l,i) => ctx.fillText(l, W/2, 155+i*30));
+  ctx.fillStyle='#aaa'; ctx.font='16px sans-serif';
+  ctx.fillText('[ LEERTASTE = nochmal versuchen ]', W/2, 422);
+}
+
+function drawWin() {
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#1a237e'); g.addColorStop(1,'#0d47a1');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  confetti.forEach(p => { p.tick(); p.draw(); });
+  ctx.textAlign='center';
+  ctx.fillStyle='#ffe082'; ctx.font='bold 32px sans-serif';
+  ctx.fillText('Glückwunsch! Du hast gewonnen.', W/2, 68);
+  ctx.fillStyle='#fff'; ctx.font='bold 22px sans-serif';
+  ctx.fillText('Erhalte jetzt dein Geschenk.', W/2, 104);
+  ctx.fillStyle='#ffe082'; ctx.font='18px sans-serif';
+  ctx.fillText('Alles Gute zum Geburtstag wünschen:', W/2, 148);
+  const names=['Corinna','Jakob','Johanna','Johannes','Katha','Katy',
+    'Felix','Simon','Simon','Simi','Moe','Mona','Niko','Stephanie'];
+  ctx.fillStyle='#fff'; ctx.font='17px sans-serif';
+  names.forEach((n,i) => ctx.fillText(n, W/2, 178+i*18));
+}
+
+// ─── UPDATE ───────────────────────────────────────────────────────────────────
+function update() {
+  if (gstate !== 'playing') return;
+  const L = LEVELS[lvlIdx];
+  for (const e of enemies) e.update();
+  if (boss) boss.update();
+
+  const res = player.update(L.platforms);
+  if (res === 'fell') { restart(); return; }
+
+  // camera
+  camX = Math.max(0, Math.min(player.x - W/3, L.worldW - W));
+
+  // event triggers (dialog)
+  for (const ev of events) {
+    if (!ev.done && player.x >= ev.trigX) {
+      ev.done = true;
+      dialog = {speaker: ev.speaker, msg: ev.msg};
+      dialogTimer = 0;
+    }
+  }
+  if (dialog) { dialogTimer++; if (dialogTimer > 220) dialog = null; }
+
+  // enemy collision
+  for (const e of enemies) {
+    if (overlap(player.bounds, e.bounds)) { restart(); return; }
+  }
+
+  // boss logic
+  if (boss) {
+    if (justPressed.has('KeyP')) player.prot = true;
+    if (boss.phase === 'blocking' && overlap(player.bounds, boss.bounds)) {
+      if (player.prot) boss.phase = 'pushed';
+      else { gstate = 'defeatHint'; return; }
+    }
+    if (boss.phase === 'pushed' && boss.offScreen) { gstate = 'win'; return; }
+  }
+
+  // goal
+  if (!L.hasBoss && player.x >= L.goalX) {
+    gstate = 'levelDone';
+  }
+}
+
+function restart() { loadLevel(lvlIdx); gstate = 'playing'; }
+
+// ─── DRAW ─────────────────────────────────────────────────────────────────────
+function drawPlaying() {
+  const L = LEVELS[lvlIdx];
+  ctx.fillStyle = L.bg; ctx.fillRect(0,0,W,H);
+  for (const d of L.decos) drawDeco({...d, x:d.x-camX});
+  // platforms
+  for (const p of L.platforms) {
+    ctx.fillStyle = L.ground;
+    ctx.fillRect(p.x-camX, p.y, p.w, p.h);
+    ctx.fillStyle = '#56ab2f';
+    ctx.fillRect(p.x-camX, p.y, p.w, 5);
+  }
+  // goal flag
+  if (!L.hasBoss) {
+    const fx = L.goalX - camX;
+    if (fx > -40 && fx < W+10) drawFlag(fx, 328);
+  }
+  for (const e of enemies) e.draw(camX);
+  if (boss) boss.draw(camX);
+  player.draw(camX);
+
+  // HUD
+  ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,240,28);
+  ctx.fillStyle='#fff'; ctx.font='bold 14px sans-serif'; ctx.textAlign='left';
+  ctx.fillText(`Level ${lvlIdx+1}: ${L.name}`, 8, 19);
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fillRect(W-220,0,220,28);
+  ctx.fillStyle='#bbb'; ctx.font='11px sans-serif'; ctx.textAlign='right';
+  ctx.fillText('←→ fahren  ↑/Space springen'+(lvlIdx>=1?' K=Kickflip':''), W-6, 18);
+
+  // dialog
+  if (dialog) {
+    if (lvlIdx === 1) drawNikoPeek(30, 330); // Niko peeking from left
+    drawBubble(70, 60, dialog.msg, dialog.speaker);
+  }
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+function handleInput() {
+  if (gstate === 'title' && justPressed.has('Space')) {
+    lvlIdx = 0; loadLevel(0); gstate = 'playing';
+  }
+  if (gstate === 'levelDone' && justPressed.has('Space')) {
+    lvlIdx++; loadLevel(lvlIdx); gstate = 'playing';
+  }
+  if (gstate === 'defeatHint' && justPressed.has('Space')) {
+    loadLevel(lvlIdx); gstate = 'playing';
+  }
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  switch(gstate) {
+    case 'title':     drawTitle(); break;
+    case 'playing':   drawPlaying(); break;
+    case 'levelDone': drawPlaying(); drawLevelDone(); break;
+    case 'defeatHint':drawPlaying(); drawDefeatHint(); break;
+    case 'win':       drawWin(); break;
+  }
+}
+
+function loop() {
+  handleInput(); update(); draw();
+  justPressed.clear();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
