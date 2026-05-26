@@ -21,10 +21,20 @@ const PW = 28, PH = 42;
 const canvas = document.getElementById('c');
 canvas.width = W; canvas.height = H;
 const ctx = canvas.getContext('2d');
+canvas.addEventListener('click', e => {
+  if (gstate !== 'win') return;
+  const r = canvas.getBoundingClientRect();
+  const mx = (e.clientX - r.left) * (W / r.width);
+  const my = (e.clientY - r.top)  * (H / r.height);
+  if (mx >= W/2-100 && mx <= W/2+100 && my >= 420 && my <= 450) {
+    lvlIdx = 0; loadLevel(0); gstate = 'title';
+  }
+});
 
 // ─── INPUT ────────────────────────────────────────────────────────────────────
 const keys = {};
 const justPressed = new Set();
+let frame = 0;
 document.addEventListener('keydown', e => {
   if (!keys[e.code]) justPressed.add(e.code);
   keys[e.code] = true;
@@ -50,6 +60,7 @@ const LEVELS = [
       {t:'bush',  x:430, y:360}, {t:'tree',  x:640, y:320},
       {t:'stone', x:930, y:372}, {t:'bush',  x:1250,y:360},
       {t:'tree',  x:1420,y:320}, {t:'bush',  x:1650,y:360},
+      {t:'johannisburg', x:1100, y:380},
     ],
     enemies: [],
     events: [],
@@ -73,12 +84,11 @@ const LEVELS = [
       {x:1470,y:380, w:450, h:20},
     ],
     decos: [
-      {t:'bldg', x:80,  y:320, bh:72}, {t:'bldg', x:380, y:300, bh:88},
-      {t:'bldg', x:920, y:290, bh:82}, {t:'bldg', x:1200,y:310, bh:68},
+      {t:'bldg', x:80,  y:380, bh:72}, {t:'bldg', x:380, y:380, bh:88},
+      {t:'bldg', x:920, y:380, bh:82}, {t:'bldg', x:1200,y:380, bh:68},
       {t:'frauenkirche', x:560,  y:380},
       {t:'olympiaturm',  x:1380, y:380},
       {t:'samerberg', x:180,  y:380},
-      {t:'samerberg', x:750,  y:370},
       {t:'samerberg', x:1250, y:380},
     ],
     enemies: [],
@@ -117,6 +127,12 @@ const LEVELS = [
       {x:710, y:312, w:26, h:36, vx:1.0, minX:695, maxX:870, msg:'Wege nur zum Wandern!'},
       {x:960, y:344, w:26, h:36, vx:1.1, minX:930, maxX:1120, msg:'MTB verbieten!'},
     ],
+    npcs: [
+      {cx:150,  type:'felix',           obstacle:true,  gy:380},
+      {cx:570,  type:'simi',            obstacle:false, gy:380},
+      {cx:1490, type:'simon_innsbruck', obstacle:true,  gy:380},
+      {cx:1555, type:'corinna',         obstacle:true,  gy:380},
+    ],
     events: [],
     goalX: 1680, worldW: 1870, hasBoss: false,
   },
@@ -133,12 +149,16 @@ const LEVELS = [
       {t:'shuttle', x:55,  y:380},
       {t:'palm', x:220, y:340}, {t:'palm', x:500, y:340},
       {t:'ocean', x:0,  y:398},
+      {t:'tree', x:130, y:335}, {t:'tree', x:390, y:335},
+      {t:'tree', x:650, y:335}, {t:'tree', x:900, y:335},
+      {t:'tree', x:1200,y:335}, {t:'tree', x:1500,y:335},
     ],
     enemies: [],
     events: [],
     npcs: [
-      {cx:710, type:'simon',   obstacle:true, gy:380},
-      {cx:745, type:'campari', obstacle:true, gy:380},
+      {cx:470, type:'katha',   obstacle:false, gy:380},
+      {cx:710, type:'simon',   obstacle:true,  gy:380},
+      {cx:745, type:'campari', obstacle:true,  gy:380},
     ],
     goalX: 99999, worldW: 1600, hasBoss: true, startY: 240,
   },
@@ -146,7 +166,7 @@ const LEVELS = [
 
 // ─── SPRITES ──────────────────────────────────────────────────────────────────
 
-function drawHofi(x, y, dir, kAngle, prot) {
+function drawLukas(x, y, dir, kAngle, prot) {
   ctx.save();
   ctx.translate(x + PW/2, y + PH/2);
   if (dir < 0) ctx.scale(-1, 1);
@@ -501,7 +521,7 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawBubble(bx, by, text, speaker) {
+function drawBubble(bx, by, text, speaker, tailRight=false) {
   const lines = text.split('\n');
   ctx.font = '13px sans-serif';
   const tw = Math.max(...lines.map(l => ctx.measureText(l).width),
@@ -510,7 +530,11 @@ function drawBubble(bx, by, text, speaker) {
   ctx.fillStyle = 'white'; ctx.strokeStyle = '#333'; ctx.lineWidth = 2;
   roundRect(bx, by, bw, bh, 8); ctx.fill(); ctx.stroke();
   // tail
-  ctx.beginPath(); ctx.moveTo(bx+20, by+bh); ctx.lineTo(bx+8, by+bh+12); ctx.lineTo(bx+38, by+bh); ctx.closePath();
+  if (tailRight) {
+    ctx.beginPath(); ctx.moveTo(bx+bw-20,by+bh); ctx.lineTo(bx+bw-8,by+bh+12); ctx.lineTo(bx+bw-38,by+bh); ctx.closePath();
+  } else {
+    ctx.beginPath(); ctx.moveTo(bx+20, by+bh); ctx.lineTo(bx+8, by+bh+12); ctx.lineTo(bx+38, by+bh); ctx.closePath();
+  }
   ctx.fillStyle = 'white'; ctx.fill(); ctx.strokeStyle = '#ccc'; ctx.lineWidth = 1; ctx.stroke();
   let ty = by+14;
   if (speaker) {
@@ -646,6 +670,116 @@ function drawSimon(sx, gy) {
   ctx.restore();
 }
 
+function drawFelix(sx, gy) {
+  ctx.save();
+  ctx.translate(sx, gy);
+  ctx.fillStyle = '#0d47a1';
+  ctx.fillRect(-6,-28,5,28); ctx.fillRect(1,-28,5,28);
+  ctx.fillStyle = '#388e3c';
+  ctx.fillRect(-8,-50,16,22);
+  ctx.strokeStyle = '#388e3c'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-8,-46); ctx.lineTo(-18,-36); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(8,-46); ctx.lineTo(18,-36); ctx.stroke();
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(0,-58,10,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#c8973a';
+  ctx.fillRect(-10,-68,20,10); ctx.beginPath(); ctx.arc(0,-60,10,Math.PI,0); ctx.fill();
+  ctx.fillStyle = '#333';
+  ctx.beginPath(); ctx.arc(-3,-60,2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(5,-60,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#a0846a';
+  ctx.beginPath(); ctx.arc(-3,-53,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(3,-53,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0,-55,1.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#111'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Felix', 0, -74);
+  ctx.restore();
+}
+function drawSimi(sx, gy) {
+  ctx.save();
+  ctx.translate(sx, gy);
+  // chair
+  ctx.fillStyle = '#795548';
+  ctx.fillRect(-14,-30,4,30); ctx.fillRect(10,-30,4,30);
+  ctx.fillRect(-18,-30,36,5);
+  ctx.fillRect(-16,-52,4,22); ctx.fillRect(12,-52,4,22);
+  ctx.fillRect(-16,-52,32,4);
+  // sitting legs
+  ctx.fillStyle = '#1565c0';
+  ctx.fillRect(-10,-28,8,8); ctx.fillRect(2,-28,8,8);
+  ctx.fillStyle = '#333';
+  ctx.fillRect(-16,-20,12,5); ctx.fillRect(4,-20,12,5);
+  // torso
+  ctx.fillStyle = '#e53935';
+  ctx.fillRect(-8,-50,16,20);
+  // head
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(0,-58,9,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#2d1b0e';
+  ctx.fillRect(-9,-67,18,9); ctx.beginPath(); ctx.arc(0,-60,9,Math.PI,0); ctx.fill();
+  ctx.fillStyle = '#333';
+  ctx.beginPath(); ctx.arc(-3,-59,2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(4,-59,2,0,Math.PI*2); ctx.fill();
+  // cigarette + smoke
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(8,-55); ctx.lineTo(18,-52); ctx.stroke();
+  ctx.fillStyle = '#e65100';
+  ctx.beginPath(); ctx.arc(18,-52,2.5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = 'rgba(180,180,180,0.7)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(18,-54); ctx.bezierCurveTo(20,-60,15,-65,18,-72); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(19,-55); ctx.bezierCurveTo(23,-63,18,-68,21,-76); ctx.stroke();
+  ctx.fillStyle = '#111'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Simi', 0, -78);
+  ctx.restore();
+}
+function drawCorinna(sx, gy) {
+  ctx.save();
+  ctx.translate(sx, gy);
+  ctx.fillStyle = '#37474f';
+  ctx.fillRect(-6,-28,5,28); ctx.fillRect(1,-28,5,28);
+  ctx.fillStyle = '#e91e63';
+  ctx.fillRect(-8,-50,16,22);
+  ctx.strokeStyle = '#e91e63'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-8,-46); ctx.lineTo(-16,-36); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(8,-46); ctx.lineTo(16,-36); ctx.stroke();
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(0,-58,10,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#4a2e1a';
+  ctx.fillRect(-10,-68,20,8); ctx.beginPath(); ctx.arc(0,-60,10,Math.PI,0); ctx.fill();
+  ctx.fillRect(-12,-68,4,18); ctx.fillRect(8,-68,4,18);
+  ctx.fillStyle = '#333';
+  ctx.beginPath(); ctx.arc(-3,-59,2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(4,-59,2,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0,-54,4,0.2,Math.PI-0.2); ctx.stroke();
+  ctx.fillStyle = '#111'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Corinna', 0, -74);
+  ctx.restore();
+}
+function drawKatha(sx, gy) {
+  ctx.save();
+  ctx.translate(sx, gy);
+  ctx.fillStyle = '#37474f';
+  ctx.fillRect(-6,-28,5,28); ctx.fillRect(1,-28,5,28);
+  ctx.fillStyle = '#7b1fa2';
+  ctx.fillRect(-8,-50,16,22);
+  ctx.strokeStyle = '#7b1fa2'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-8,-46); ctx.lineTo(-16,-36); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(8,-46); ctx.lineTo(16,-36); ctx.stroke();
+  ctx.fillStyle = '#f4c08a';
+  ctx.beginPath(); ctx.arc(0,-58,10,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#6d3b1a';
+  ctx.fillRect(-10,-68,20,8); ctx.beginPath(); ctx.arc(0,-60,10,Math.PI,0); ctx.fill();
+  ctx.fillRect(-11,-68,4,16); ctx.fillRect(7,-68,4,16);
+  ctx.fillStyle = '#333';
+  ctx.beginPath(); ctx.arc(-3,-59,2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(4,-59,2,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0,-54,4,0.3,Math.PI-0.3); ctx.stroke();
+  ctx.fillStyle = '#111'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Katha', 0, -74);
+  ctx.restore();
+}
 function drawCampariGlass(sx, gy) {
   ctx.save();
   ctx.translate(sx, gy);
@@ -768,6 +902,32 @@ function drawDeco(d) {
       ctx.quadraticCurveTo(20, -28, 38, 0);
       ctx.quadraticCurveTo(55, -38, 75, 0);
       ctx.fill();
+      break;
+    }
+    case 'johannisburg': {
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = '#3d3028';
+      // Zentralgebäude (Palas)
+      ctx.fillRect(-45,-75,90,75);
+      // Dach
+      ctx.beginPath(); ctx.moveTo(-50,-75); ctx.lineTo(0,-100); ctx.lineTo(50,-75); ctx.fill();
+      // Linker Eckturm (unten)
+      ctx.fillRect(-66,-60,28,60);
+      ctx.beginPath(); ctx.arc(-52,-60,14,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-62,-60); ctx.lineTo(-52,-82); ctx.lineTo(-42,-60); ctx.fill();
+      // Rechter Eckturm (unten)
+      ctx.fillRect(38,-60,28,60);
+      ctx.beginPath(); ctx.arc(52,-60,14,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(42,-60); ctx.lineTo(52,-82); ctx.lineTo(62,-60); ctx.fill();
+      // Linker Eckturm (oben, höher)
+      ctx.fillRect(-70,-120,28,60);
+      ctx.beginPath(); ctx.arc(-56,-120,14,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-66,-120); ctx.lineTo(-56,-143); ctx.lineTo(-46,-120); ctx.fill();
+      // Rechter Eckturm (oben, höher)
+      ctx.fillRect(42,-120,28,60);
+      ctx.beginPath(); ctx.arc(56,-120,14,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(46,-120); ctx.lineTo(56,-143); ctx.lineTo(66,-120); ctx.fill();
+      ctx.globalAlpha = 1;
       break;
     }
     case 'ambras': {
@@ -915,7 +1075,7 @@ class Player {
     if (this.x < 0) this.x = 0;
     if (this.y + PH > H + 80) return 'fell';
   }
-  draw(cx) { drawHofi(this.x-cx, this.y, this.dir, this.flipping?this.flipAngle:0, this.prot); }
+  draw(cx) { drawLukas(this.x-cx, this.y, this.dir, this.flipping?this.flipAngle:0, this.prot); }
   get bounds() { return {x:this.x, y:this.y, w:PW, h:PH}; }
 }
 
@@ -984,7 +1144,11 @@ function loadLevel(i) {
   dialog = null; dialogTimer = 0; camX = 0; childWarningShown = false;
   bossDefeated = false;
   johannesFly = (i===3) ? {x:W+80, y:155, timer:0, active:false} : null;
-  npcs = (L.npcs||[]).map(n => ({...n}));
+  npcs = (L.npcs||[]).map(n => {
+    const obj = {...n};
+    if (obj.type === 'corinna') { obj.pushed = false; obj.launchVy = 0; obj.y = obj.gy; }
+    return obj;
+  });
 }
 
 // ─── SCREENS ──────────────────────────────────────────────────────────────────
@@ -1004,15 +1168,14 @@ function drawTitle() {
   ctx.fillStyle='#fff'; ctx.font='bold 54px sans-serif';
   ctx.fillText('HOFIGAME', W/2, 98);
   ctx.fillStyle='#ffe082'; ctx.font='20px sans-serif';
-  ctx.fillText('Alles Gute zum Geburtstag, Hofi!', W/2, 136);
+  ctx.fillText('Alles Gute zum Geburtstag, Lukas!', W/2, 136);
 
-  // mini Hofi
-  drawHofi(364, 190, 1, 0, false);
+  // mini Lukas
+  drawLukas(364, 190, 1, 0, false);
 
   ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(180,270,440,110);
   ctx.fillStyle='#e0e0e0'; ctx.font='16px sans-serif';
-  ctx.fillText('Pfeiltasten = fahren   Leertaste/↑ = springen', W/2, 298);
-  ctx.fillText('K (in der Luft) = Kickflip  (Level 2+)', W/2, 322);
+  ctx.fillText('Pfeiltasten = fahren', W/2, 310);
   ctx.fillText('4 Level, 1 Boss-Kampf – viel Erfolg!', W/2, 346);
   ctx.fillStyle='#ffe082'; ctx.font='bold 22px sans-serif';
   ctx.fillText('[ LEERTASTE zum Starten ]', W/2, 402);
@@ -1064,13 +1227,22 @@ function drawWin() {
   ctx.fillText('Alles Gute zum Geburtstag wünschen:', W/2, 148);
   const names=['Corinna','Jakob','Johanna','Johannes','Katha','Katy',
     'Felix','Simon','Simon','Simi','Moe','Mona','Niko','Stephanie'];
-  ctx.fillStyle='#fff'; ctx.font='17px sans-serif';
-  names.forEach((n,i) => ctx.fillText(n, W/2, 178+i*18));
+  ctx.fillStyle='#fff'; ctx.font='15px sans-serif';
+  names.forEach((n,i) => ctx.fillText(n, W/2, 174+i*16));
+  ctx.fillStyle='#ffe082'; ctx.font='bold 15px sans-serif';
+  ctx.fillText('viel Spaß mit deinem neuen Protector!', W/2, 174+names.length*16+14);
+  // Neustart-Button
+  const btnW=200, btnH=30, btnX=W/2-100, btnY=420;
+  ctx.fillStyle='#ffe082'; roundRect(btnX,btnY,btnW,btnH,8); ctx.fill();
+  ctx.strokeStyle='#f9a825'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#1a237e'; ctx.font='bold 16px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('↺  Neustart', W/2, btnY+21);
 }
 
 // ─── UPDATE ───────────────────────────────────────────────────────────────────
 function update() {
   if (gstate !== 'playing') return;
+  frame++;
   const L = LEVELS[lvlIdx];
   for (const e of enemies) e.update();
   if (boss) boss.update();
@@ -1109,15 +1281,34 @@ function update() {
     }
   }
 
+  // Corinna launch physics
+  for (const n of npcs) {
+    if (n.type === 'corinna' && n.pushed) {
+      n.launchVy -= 0.4;
+      n.y += n.launchVy;
+    }
+  }
+
   // NPC obstacle collision
   for (const n of npcs) {
     if (!n.obstacle) continue;
+    // Corinna: S key gives her a Spezi instead of restarting
+    if (n.type === 'corinna') {
+      if (n.pushed) continue;
+      const hb = {x:n.cx-8, y:n.y-60, w:16, h:60};
+      if (overlap(player.bounds, hb) && keys['KeyS']) {
+        n.pushed = true; n.launchVy = -10;
+      }
+      continue;
+    }
     let hb;
     switch(n.type) {
       case 'johanna':   hb={x:n.cx-28,y:n.gy-22,w:56,h:22}; break;
       case 'velomobil': hb={x:n.cx-38,y:n.gy-42,w:76,h:42}; break;
-      case 'simon':     hb={x:n.cx-8, y:n.gy-60,w:16,h:60}; break;
-      case 'campari':   hb={x:n.cx-11,y:n.gy-28,w:22,h:28}; break;
+      case 'simon':           hb={x:n.cx-8, y:n.gy-60,w:16,h:60}; break;
+      case 'campari':         hb={x:n.cx-11,y:n.gy-28,w:22,h:28}; break;
+      case 'felix':           hb={x:n.cx-8, y:n.gy-60,w:16,h:60}; break;
+      case 'simon_innsbruck': hb={x:n.cx-8, y:n.gy-60,w:16,h:60}; break;
       default: continue;
     }
     if (overlap(player.bounds, hb)) { restart(); return; }
@@ -1141,7 +1332,11 @@ function update() {
 
   // boss logic
   if (boss) {
-    if (justPressed.has('KeyP')) player.prot = true;
+    if (justPressed.has('KeyP') && !player.prot) {
+      player.prot = true;
+      dialog = {speaker: null, msg: 'Glückwunsch, du hast\njetzt einen Protector!'};
+      dialogTimer = 0;
+    }
     if (boss.phase === 'blocking' && overlap(player.bounds, boss.bounds)) {
       if (player.prot) boss.phase = 'pushed';
       else { gstate = 'defeatHint'; return; }
@@ -1198,11 +1393,11 @@ function drawPlaying() {
         break;
       case 'johanna':
         drawJohanna(sx, n.gy);
-        drawBubble(sx-20, n.gy-105, 'Ich bin gestürzt, aber kein\nProblem, morgen 150km Radtour', 'Johanna');
+        drawBubble(sx-20, n.gy-165, 'Ich bin gestürzt, aber kein\nProblem, morgen 150km Radtour', 'Johanna');
         break;
       case 'velomobil':
         drawVelomobil(sx, n.gy);
-        drawThoughtBubble(sx+10, n.gy-130, 'Bald KPMG Gehalt\nhehehe, da kann man sich\nschon Mal was gönnen');
+        drawBubble(sx+40, n.gy-185, 'Bald KPMG Gehalt\nhehehe, da kann man sich\nschon Mal was gönnen', 'Jakob');
         break;
       case 'simon':
         drawSimon(sx, n.gy);
@@ -1210,6 +1405,36 @@ function drawPlaying() {
         break;
       case 'campari':
         drawCampariGlass(sx, n.gy);
+        break;
+      case 'katha':
+        drawKatha(sx, n.gy);
+        drawThoughtBubble(sx+15, n.gy-215, '5 Prellungen, alles voller\nblauer Flecken, aber kein\nProblem, ich bin die nächsten\n3 Wochen eh komplett verplant\nmit Arbeit, 4 Hausparties\nund Radtouren');
+        break;
+      case 'felix': {
+        drawFelix(sx, n.gy);
+        const felixMsgs = [
+          'Ja klar, mein Bike kannst\ndu haben aber wehe du\nlegst den Schwamm nochmal\nan die falsche Stelle in\nder Küche, dann fliegst\ndu raus.',
+          'Hmmm, noch 5g Protein\nheute essen und 3g\nKreatin, dann sollte ich\nbei Recovery Score 90+\nmeine FTP morgen um\n2,2% verbessert haben.'
+        ];
+        drawBubble(sx+15, n.gy-235, felixMsgs[Math.floor(frame/300)%2], 'Felix');
+        break;
+      }
+      case 'simi':
+        drawSimi(sx, n.gy);
+        drawBubble(sx+15, n.gy-150, 'Psychoanalyse ist die\neinzige richtige\nAntwort.', 'Simi');
+        break;
+      case 'simon_innsbruck':
+        drawSimon(sx, n.gy);
+        drawBubble(sx-195, n.gy-185, 'Schau mich nicht so an\nsonst lasse ich dich\nfeuern.', 'Simon', true);
+        break;
+      case 'corinna':
+        if (n.pushed) {
+          drawCorinna(sx, n.y);
+          drawBubble(sx+20, n.y-80, 'Juhuuu, danke!', 'Corinna');
+        } else {
+          drawCorinna(sx, n.gy);
+          drawBubble(sx+20, n.gy-160, 'Hofi wo ist\nmeine Spezi?', 'Corinna');
+        }
         break;
     }
   }
@@ -1221,15 +1446,22 @@ function drawPlaying() {
         drawChild(sx, 367, c.type, c.name);
       } else if (c.type === 'mona') {
         drawMona(sx, 380);
-        drawBubble(sx-10, 250, 'MTB is gruselig,\nich backe lieber', null);
+        drawBubble(sx+15, 195, 'MTB is gruselig,\nich backe lieber', null);
       } else if (c.type === 'katy') {
         drawKaty(sx, 380);
-        drawBubble(sx-10, 285, 'Rennrad > MTB', null);
+        drawBubble(sx+15, 225, 'Rennrad > MTB', null);
       }
     }
   }
   if (boss) boss.draw(camX);
   player.draw(camX);
+
+  // Spezi notification
+  if (npcs.some(n => n.type === 'corinna' && n.pushed)) {
+    ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(4,32,322,26);
+    ctx.fillStyle='#ffe082'; ctx.font='bold 13px sans-serif'; ctx.textAlign='left';
+    ctx.fillText('Du hast Corinna eine Spezi gegeben. 🥤', 10, 49);
+  }
 
   // HUD
   ctx.fillStyle='rgba(0,0,0,0.45)'; ctx.fillRect(0,0,240,28);
@@ -1257,6 +1489,9 @@ function handleInput() {
   }
   if (gstate === 'defeatHint' && justPressed.has('Space')) {
     loadLevel(lvlIdx); gstate = 'playing';
+  }
+  if (gstate === 'win' && justPressed.has('Space')) {
+    lvlIdx = 0; loadLevel(0); gstate = 'title';
   }
 }
 
