@@ -24,6 +24,26 @@
   #tL { left:4vw; bottom:6vh; width:14vh; height:14vh; }
   #tR { left:calc(4vw + 16vh); bottom:6vh; width:14vh; height:14vh; }
   #tJ { right:4vw; bottom:6vh; width:18vh; height:18vh; font-size:22px; }
+  /* Contextual buttons — shown only when game logic enables them */
+  #tK { right:calc(4vw + 20vh); bottom:9vh; width:13vh; height:13vh; font-size:18px;
+        background:rgba(255,180,0,0.35); border-color:rgba(255,200,40,0.7); display:none; }
+  #tS { left:calc(4vw + 32vh); bottom:9vh; width:13vh; height:13vh; font-size:16px;
+        background:rgba(255,120,40,0.45); border-color:rgba(255,160,80,0.8); display:none; }
+  body.touch #tK.on, body.touch #tS.on { display:flex; }
+  /* Protektor input overlay on defeat hint */
+  #pBox { position:absolute; left:50%; bottom:14%; transform:translateX(-50%);
+          display:none; flex-direction:column; align-items:center; gap:10px;
+          background:rgba(0,0,40,0.6); border:1px solid rgba(255,224,130,0.5); border-radius:12px;
+          padding:14px 18px; z-index:5; pointer-events:auto; }
+  #pBox.on { display:flex; }
+  #pBox label { color:#ffe082; font:600 14px sans-serif; }
+  #pInput { width:80px; padding:8px 10px; font:bold 22px sans-serif; text-align:center;
+            border-radius:8px; border:2px solid #ffe082; background:#1a1a3a; color:#fff;
+            text-transform:lowercase; }
+  #pInput.wrong { border-color:#e74c3c; animation: shake 0.35s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+  #pSubmit { padding:8px 16px; border-radius:8px; border:none; background:#ffe082; color:#222;
+             font:bold 14px sans-serif; cursor:pointer; }
   /* Hint when phone is portrait */
   #rotate { position:fixed; inset:0; background:#111; color:#fff; display:none; align-items:center; justify-content:center; text-align:center; font:600 18px sans-serif; padding:24px; z-index:10; }
   @media (orientation: portrait) and (max-width: 900px) {
@@ -38,6 +58,13 @@
     <div id="tL" class="tbtn">◀</div>
     <div id="tR" class="tbtn">▶</div>
     <div id="tJ" class="tbtn">JUMP</div>
+    <div id="tK" class="tbtn">TRICK</div>
+    <div id="tS" class="tbtn">🥤 SPEZI</div>
+  </div>
+  <div id="pBox">
+    <label for="pInput">Dein Tipp:</label>
+    <input id="pInput" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text">
+    <button id="pSubmit" type="button">Bestätigen</button>
   </div>
 </div>
 <div id="rotate">📱↻<br><br>Bitte Handy quer drehen<br><span style="font-weight:400;opacity:0.7;font-size:14px">für das beste Spielerlebnis</span></div>
@@ -102,6 +129,48 @@ function bindTouchButton(elId, code) {
 bindTouchButton('tL', 'ArrowLeft');
 bindTouchButton('tR', 'ArrowRight');
 bindTouchButton('tJ', 'Space');
+bindTouchButton('tS', 'KeyS');
+
+// Kickflip: one-shot tap (justPressed fires once, key released same tick)
+function bindOneShotButton(elId, code) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const fire = e => {
+    e.preventDefault();
+    justPressed.add(code);
+    keys[code] = true;
+    el.classList.add('pressed');
+    setTimeout(() => { keys[code] = false; el.classList.remove('pressed'); }, 80);
+  };
+  el.addEventListener('touchstart', fire, {passive:false});
+  el.addEventListener('mousedown', fire);
+}
+bindOneShotButton('tK', 'KeyK');
+
+// Protektor input — submit triggers KeyP on defeat hint screen
+const pInput = document.getElementById('pInput');
+const pSubmit = document.getElementById('pSubmit');
+function submitProtectorGuess() {
+  const v = (pInput.value || '').trim().toLowerCase();
+  if (v[0] === 'p') {
+    pInput.value = '';
+    pInput.blur();
+    // Restart level, grant protector, show dialog
+    loadLevel(lvlIdx);
+    player.prot = true;
+    dialog = {speaker: null, msg: 'Glückwunsch, du hast\njetzt einen Protector!'};
+    dialogTimer = 0;
+    gstate = 'playing';
+  } else {
+    pInput.classList.add('wrong');
+    setTimeout(() => pInput.classList.remove('wrong'), 400);
+  }
+}
+pSubmit.addEventListener('click', submitProtectorGuess);
+pInput.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') { e.preventDefault(); submitProtectorGuess(); }
+});
 
 // ─── LEVELS ───────────────────────────────────────────────────────────────────
 const LEVELS = [
@@ -1567,8 +1636,32 @@ function draw() {
   }
 }
 
+// Toggle contextual touch UI based on game state — runs every frame
+const tKEl = document.getElementById('tK');
+const tSEl = document.getElementById('tS');
+const pBox = document.getElementById('pBox');
+function updateTouchUI() {
+  const playing = (gstate === 'playing');
+  // K (kickflip): airborne in Level 2+ and still allowed to flip
+  const showK = playing && player && !player.onGround && player.canFlip && lvlIdx >= 1;
+  tKEl.classList.toggle('on', showK);
+  // S (Spezi): overlapping Corinna in Level 3
+  let showS = false;
+  if (playing && player && npcs) {
+    for (const n of npcs) {
+      if (n.type === 'corinna' && !n.pushed) {
+        const hb = {x:n.cx-8, y:n.y-60, w:16, h:60};
+        if (overlap(player.bounds, hb)) { showS = true; break; }
+      }
+    }
+  }
+  tSEl.classList.toggle('on', showS);
+  // P input: on defeat hint screen
+  pBox.classList.toggle('on', gstate === 'defeatHint');
+}
+
 function loop() {
-  handleInput(); update(); draw();
+  handleInput(); update(); draw(); updateTouchUI();
   justPressed.clear();
   requestAnimationFrame(loop);
 }
