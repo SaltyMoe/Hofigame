@@ -25,17 +25,17 @@
   #tR { left:calc(4vw + 16vh); bottom:6vh; width:14vh; height:14vh; }
   #tJ { right:4vw; bottom:6vh; width:18vh; height:18vh; font-size:22px; }
   /* Contextual buttons — shown only when game logic enables them */
-  #tK { right:calc(4vw + 20vh); bottom:9vh; width:13vh; height:13vh; font-size:18px;
-        background:rgba(255,180,0,0.35); border-color:rgba(255,200,40,0.7); display:none; }
   #tS { left:calc(4vw + 32vh); bottom:9vh; width:13vh; height:13vh; font-size:16px;
         background:rgba(255,120,40,0.45); border-color:rgba(255,160,80,0.8); display:none; }
-  body.touch #tK.on, body.touch #tS.on { display:flex; }
+  body.touch #tS.on { display:flex; }
+  /* When kickflip is available, JUMP button glows to hint double-tap */
+  #tJ.flipReady { background:rgba(255,200,40,0.5); border-color:rgba(255,220,80,1); box-shadow:0 0 16px rgba(255,200,40,0.7); }
   /* Protektor input overlay on defeat hint */
   #pBox { position:absolute; left:50%; bottom:14%; transform:translateX(-50%);
           display:none; flex-direction:column; align-items:center; gap:10px;
           background:rgba(0,0,40,0.6); border:1px solid rgba(255,224,130,0.5); border-radius:12px;
           padding:14px 18px; z-index:5; pointer-events:auto; }
-  #pBox.on { display:flex; }
+  body.touch #pBox.on { display:flex; }
   #pBox label { color:#ffe082; font:600 14px sans-serif; }
   #pInput { width:80px; padding:8px 10px; font:bold 22px sans-serif; text-align:center;
             border-radius:8px; border:2px solid #ffe082; background:#1a1a3a; color:#fff;
@@ -58,7 +58,6 @@
     <div id="tL" class="tbtn">◀</div>
     <div id="tR" class="tbtn">▶</div>
     <div id="tJ" class="tbtn">JUMP</div>
-    <div id="tK" class="tbtn">TRICK</div>
     <div id="tS" class="tbtn">🥤 SPEZI</div>
   </div>
   <div id="pBox">
@@ -101,8 +100,14 @@ document.addEventListener('keydown', e => {
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
 // ─── TOUCH INPUT ──────────────────────────────────────────────────────────────
-const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+// Use (pointer: coarse) media query — true on mobile/tablet, false on desktop
+// even when the device technically has a touchscreen. Falls back to a real
+// touchstart event in case the media query lies on some hybrid device.
+let isTouch = matchMedia('(pointer: coarse)').matches;
 if (isTouch) document.body.classList.add('touch');
+window.addEventListener('touchstart', () => {
+  if (!isTouch) { isTouch = true; document.body.classList.add('touch'); }
+}, {once:true, passive:true});
 
 function bindTouchButton(elId, code) {
   const el = document.getElementById(elId);
@@ -128,24 +133,33 @@ function bindTouchButton(elId, code) {
 }
 bindTouchButton('tL', 'ArrowLeft');
 bindTouchButton('tR', 'ArrowRight');
-bindTouchButton('tJ', 'Space');
 bindTouchButton('tS', 'KeyS');
 
-// Kickflip: one-shot tap (justPressed fires once, key released same tick)
-function bindOneShotButton(elId, code) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  const fire = e => {
-    e.preventDefault();
-    justPressed.add(code);
-    keys[code] = true;
-    el.classList.add('pressed');
-    setTimeout(() => { keys[code] = false; el.classList.remove('pressed'); }, 80);
-  };
-  el.addEventListener('touchstart', fire, {passive:false});
-  el.addEventListener('mousedown', fire);
-}
-bindOneShotButton('tK', 'KeyK');
+// JUMP button — contextual: on ground = jump, in air with canFlip = kickflip
+const tJEl = document.getElementById('tJ');
+const tJPress = e => {
+  e.preventDefault();
+  if (player && !player.onGround && player.canFlip) {
+    justPressed.add('KeyK');
+    keys['KeyK'] = true;
+    setTimeout(() => { keys['KeyK'] = false; }, 80);
+  } else {
+    if (!keys['Space']) justPressed.add('Space');
+    keys['Space'] = true;
+  }
+  tJEl.classList.add('pressed');
+};
+const tJRelease = e => {
+  e.preventDefault();
+  keys['Space'] = false;
+  tJEl.classList.remove('pressed');
+};
+tJEl.addEventListener('touchstart', tJPress, {passive:false});
+tJEl.addEventListener('touchend',   tJRelease, {passive:false});
+tJEl.addEventListener('touchcancel',tJRelease, {passive:false});
+tJEl.addEventListener('mousedown',  tJPress);
+tJEl.addEventListener('mouseup',    tJRelease);
+tJEl.addEventListener('mouseleave', tJRelease);
 
 // Protektor input — submit triggers KeyP on defeat hint screen
 const pInput = document.getElementById('pInput');
@@ -1519,7 +1533,7 @@ function drawPlaying() {
     switch(n.type) {
       case 'niko':
         drawNikoStanding(sx, n.gy);
-        drawBubble(sx+15, n.gy-148, 'Mach einen Kickflip!\n(drücke K in der Luft)', 'Niko');
+        drawBubble(sx+15, n.gy-148, isTouch ? 'Mach einen Kickflip!\n(tippe JUMP nochmal in der Luft)' : 'Mach einen Kickflip!\n(drücke K in der Luft)', 'Niko');
         break;
       case 'johanna':
         drawJohanna(sx, n.gy);
@@ -1637,14 +1651,13 @@ function draw() {
 }
 
 // Toggle contextual touch UI based on game state — runs every frame
-const tKEl = document.getElementById('tK');
 const tSEl = document.getElementById('tS');
 const pBox = document.getElementById('pBox');
 function updateTouchUI() {
   const playing = (gstate === 'playing');
-  // K (kickflip): airborne in Level 2+ and still allowed to flip
-  const showK = playing && player && !player.onGround && player.canFlip && lvlIdx >= 1;
-  tKEl.classList.toggle('on', showK);
+  // JUMP button glows yellow when a kickflip is available (Level 2+ in air)
+  const flipReady = playing && player && !player.onGround && player.canFlip && lvlIdx >= 1;
+  tJEl.classList.toggle('flipReady', flipReady);
   // S (Spezi): overlapping Corinna in Level 3
   let showS = false;
   if (playing && player && npcs) {
