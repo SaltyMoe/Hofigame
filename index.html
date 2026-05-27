@@ -2,14 +2,45 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Hofigame – Alles Gute zum Geburtstag!</title>
 <style>
-  body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
-  canvas { display:block; }
+  html, body { margin:0; padding:0; background:#111; height:100%; overflow:hidden; overscroll-behavior:none; touch-action:none; }
+  body { display:flex; justify-content:center; align-items:center; }
+  #stage { position:relative; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center; }
+  canvas { display:block; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); image-rendering: pixelated; image-rendering: crisp-edges; }
+  /* Touch controls — only shown on touch-capable devices */
+  #touch { position:absolute; inset:0; pointer-events:none; display:none; }
+  body.touch #touch { display:block; }
+  .tbtn {
+    position:absolute; pointer-events:auto;
+    background:rgba(255,255,255,0.18); border:2px solid rgba(255,255,255,0.45);
+    border-radius:50%; color:#fff; font:bold 28px sans-serif;
+    display:flex; align-items:center; justify-content:center;
+    user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent;
+    backdrop-filter: blur(2px);
+  }
+  .tbtn.pressed { background:rgba(255,255,255,0.38); }
+  #tL { left:4vw; bottom:6vh; width:14vh; height:14vh; }
+  #tR { left:calc(4vw + 16vh); bottom:6vh; width:14vh; height:14vh; }
+  #tJ { right:4vw; bottom:6vh; width:18vh; height:18vh; font-size:22px; }
+  /* Hint when phone is portrait */
+  #rotate { position:fixed; inset:0; background:#111; color:#fff; display:none; align-items:center; justify-content:center; text-align:center; font:600 18px sans-serif; padding:24px; z-index:10; }
+  @media (orientation: portrait) and (max-width: 900px) {
+    body.touch #rotate { display:flex; }
+  }
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="touch">
+    <div id="tL" class="tbtn">◀</div>
+    <div id="tR" class="tbtn">▶</div>
+    <div id="tJ" class="tbtn">JUMP</div>
+  </div>
+</div>
+<div id="rotate">📱↻<br><br>Bitte Handy quer drehen<br><span style="font-weight:400;opacity:0.7;font-size:14px">für das beste Spielerlebnis</span></div>
 <script>
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const W = 800, H = 450;
@@ -41,6 +72,36 @@ document.addEventListener('keydown', e => {
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ─── TOUCH INPUT ──────────────────────────────────────────────────────────────
+const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+if (isTouch) document.body.classList.add('touch');
+
+function bindTouchButton(elId, code) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const press = e => {
+    e.preventDefault();
+    if (!keys[code]) justPressed.add(code);
+    keys[code] = true;
+    el.classList.add('pressed');
+  };
+  const release = e => {
+    e.preventDefault();
+    keys[code] = false;
+    el.classList.remove('pressed');
+  };
+  el.addEventListener('touchstart', press, {passive:false});
+  el.addEventListener('touchend',   release, {passive:false});
+  el.addEventListener('touchcancel',release, {passive:false});
+  // Mouse fallback (desktop debugging)
+  el.addEventListener('mousedown',  press);
+  el.addEventListener('mouseup',    release);
+  el.addEventListener('mouseleave', release);
+}
+bindTouchButton('tL', 'ArrowLeft');
+bindTouchButton('tR', 'ArrowRight');
+bindTouchButton('tJ', 'Space');
 
 // ─── LEVELS ───────────────────────────────────────────────────────────────────
 const LEVELS = [
