@@ -8,7 +8,11 @@
   html, body { margin:0; padding:0; background:#111; height:100%; overflow:hidden; overscroll-behavior:none; touch-action:none; }
   body { display:flex; justify-content:center; align-items:center; }
   #stage { position:relative; width:100vw; height:100vh; display:flex; justify-content:center; align-items:center; }
-  canvas { display:block; width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); image-rendering: pixelated; image-rendering: crisp-edges; }
+  canvas { display:block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  /* Only fill the viewport on touch devices (mobile/tablet) */
+  @media (pointer: coarse) {
+    canvas { width: min(100vw, calc(100vh * 16 / 9)); height: min(100vh, calc(100vw * 9 / 16)); }
+  }
   /* Touch controls — only shown on touch-capable devices */
   #touch { position:absolute; inset:0; pointer-events:none; display:none; }
   body.touch #touch { display:block; }
@@ -1322,7 +1326,7 @@ function drawTitle() {
   ctx.fillText('Pfeiltasten = fahren', W/2, 310);
   ctx.fillText('4 Level, 1 Boss-Kampf – viel Erfolg!', W/2, 346);
   ctx.fillStyle='#ffe082'; ctx.font='bold 22px sans-serif';
-  ctx.fillText('[ LEERTASTE zum Starten ]', W/2, 402);
+  ctx.fillText(isTouch ? '[ JUMP zum Starten ]' : '[ LEERTASTE zum Starten ]', W/2, 402);
 }
 
 function drawLevelDone() {
@@ -1334,7 +1338,7 @@ function drawLevelDone() {
   ctx.fillText(LEVELS[lvlIdx].name+' ✓', W/2, 225);
   if (lvlIdx < LEVELS.length-1) {
     ctx.fillStyle='#ccc'; ctx.font='18px sans-serif';
-    ctx.fillText('[ LEERTASTE für nächstes Level ]', W/2, 315);
+    ctx.fillText(isTouch ? '[ JUMP für nächstes Level ]' : '[ LEERTASTE für nächstes Level ]', W/2, 315);
   }
 }
 
@@ -1354,7 +1358,7 @@ function drawDefeatHint() {
   ];
   lines.forEach((l,i) => ctx.fillText(l, W/2, 155+i*30));
   ctx.fillStyle='#aaa'; ctx.font='16px sans-serif';
-  ctx.fillText('[ LEERTASTE = nochmal versuchen ]', W/2, 422);
+  ctx.fillText(isTouch ? '[ JUMP = nochmal versuchen ]' : '[ LEERTASTE = nochmal versuchen ]', W/2, 422);
 }
 
 function drawWin() {
@@ -1416,7 +1420,7 @@ function update() {
       if (overlap(player.bounds, hb)) {
         if ((c.type==='bike'||c.type==='laufrad') && !childWarningShown) {
           childWarningShown = true;
-          dialog = {speaker:'Stephie', msg:'Hey, fahr nicht Helena und Clara\nüber den Haufen!\nNutze Leertaste um zu springen.'};
+          dialog = {speaker:'Stephie', msg:'Hey, fahr nicht Helena und Clara\nüber den Haufen!\n'+(isTouch ? 'Tippe JUMP um zu springen.' : 'Nutze Leertaste um zu springen.')};
           dialogTimer = 0;
           player.x=50; player.y=338; player.vx=0; player.vy=0; player.onGround=false;
         } else { restart(); return; }
